@@ -19,6 +19,8 @@ import plotly.express as px
 import shap
 import streamlit as st
 
+from ml.drift import compute_drift_report, psi_verdict
+
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
@@ -138,7 +140,7 @@ def score_transaction(values: dict):
 st.title("\U0001F6E1\ufe0f AI Risk Manager")
 st.caption("Fraud-spike detector for Indian digital-payment fraud -- UPI scams, SIM-swap takeover, remote-access sessions, mule rings. Defense-only: scores and explains, never simulates or optimizes attacks.")
 
-tab1, tab2, tab3 = st.tabs(["\U0001F50E Score a Transaction", "\U0001F4CA Model Performance", "\U0001F4CB Review Queue Demo"])
+tab1, tab2, tab3, tab4 = st.tabs(["\U0001F50E Score a Transaction", "\U0001F4CA Model Performance", "\U0001F4CB Review Queue Demo", "\U0001F4C9 Data Drift Monitor"])
 
 # ---- TAB 1: Live scorer ----------------------------------------------
 with tab1:
@@ -299,3 +301,85 @@ with tab3:
         c3.metric("Actual fraud missed", int(n_missed))
     else:
         st.info("Click **Pull a fresh batch** to see the review queue in action.")
+
+# ---- TAB 4: Data drift monitor ------------------------------------------
+DRIFT_FEATURES = [
+    "amount", "amount_zscore", "velocity_1h", "velocity_24h",
+    "distinct_merchants_24h", "cross_merchant_velocity_1h",
+    "account_age_days", "payee_added_to_txn_minutes", "session_duration_sec",
+    "merchant_risk_score",
+]
+
+with tab4:
+    st.subheader("Data drift monitor")
+    st.caption(
+        "Fraud patterns aren't static — scammers adapt, new UPI-scam variants emerge, "
+        "mule rings change their cadence. This model was trained once on a fixed dataset; "
+        "if live traffic drifts away from that distribution, recall quietly degrades with "
+        "no crash and no error. This panel uses Population Stability Index (PSI) to compare "
+        "a live batch against the training distribution and flag when the model may need retraining."
+    )
+
+    st.markdown("""
+    | PSI range | Meaning |
+    |---|---|
+    | < 0.10 | Stable — no significant shift |
+    | 0.10 – 0.25 | Moderate shift — monitor closely |
+    | ≥ 0.25 | Significant shift — investigate / retrain |
+    """)
+
+    df_full = load_dataset()
+    reference = df_full.sample(min(40000, len(df_full)), random_state=1)
+
+    c1, c2 = st.columns(2)
+    pull_normal = c1.button("Simulate normal traffic (no drift)", use_container_width=True)
+    pull_drift = c2.button("Simulate a fraud wave evolving (drift)", use_container_width=True)
+
+    if pull_normal or pull_drift:
+        batch = df_full.sample(3000, random_state=None).copy()
+        if pull_drift:
+            # simulate a new mule-ring wave that's gotten faster/quieter than
+            # what the model was trained on -- the realistic "drift" story
+            rng = np.random.default_rng()
+            batch["payee_added_to_txn_minutes"] = batch["payee_added_to_txn_minutes"].astype(float)
+            shift_idx = batch.sample(frac=0.4, random_state=None).index
+            batch.loc[shift_idx, "cross_merchant_velocity_1h"] += rng.poisson(5, len(shift_idx))
+            batch.loc[shift_idx, "distinct_merchants_24h"] += rng.poisson(4, len(shift_idx))
+            batch.loc[shift_idx, "payee_added_to_txn_minutes"] *= 0.15
+            batch["amount"] = batch["amount"] * rng.uniform(1.3, 1.6)
+            st.session_state["drift_label"] = "Simulated drifted batch (fraud wave evolving)"
+        else:
+            st.session_state["drift_label"] = "Simulated normal batch (no drift)"
+
+        report = compute_drift_report(reference, batch, DRIFT_FEATURES)
+        st.session_state["drift_report"] = report
+
+    if "drift_report" in st.session_state:
+        report = st.session_state["drift_report"]
+        st.markdown(f"#### {st.session_state['drift_label']}")
+
+        overall_psi = report["psi"].mean()
+        overall_verdict = psi_verdict(overall_psi)
+        verdict_color = {"stable": "green", "moderate shift -- monitor": "orange",
+                          "significant shift -- investigate/retrain": "red"}[overall_verdict]
+        st.markdown(f"**Overall verdict:** :{verdict_color}[{overall_verdict}]  (mean PSI = {overall_psi:.3f})")
+
+        fig4 = px.bar(
+            report, x="psi", y="feature", orientation="h", color="psi",
+            color_continuous_scale=["#27ae60", "#f39c12", "#e74c3c"], range_color=[0, 0.5],
+            labels={"psi": "PSI (higher = more drift)", "feature": ""},
+        )
+        fig4.add_vline(x=0.10, line_dash="dot", line_color="orange")
+        fig4.add_vline(x=0.25, line_dash="dot", line_color="red")
+        fig4.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), coloraxis_showscale=False)
+        st.plotly_chart(fig4, use_container_width=True)
+
+        drifted_features = report[report["psi"] >= 0.10]["feature"].tolist()
+        if drifted_features:
+            st.warning(f"Features showing drift: **{', '.join(drifted_features)}**. "
+                       f"If this persists across multiple live batches (not just one noisy sample), "
+                       f"it's a signal to retrain on recent data rather than trusting the current model indefinitely.")
+        else:
+            st.success("No features show meaningful drift — the model's training distribution still matches live traffic.")
+    else:
+        st.info("Click one of the buttons above to pull a batch and check for drift.")
