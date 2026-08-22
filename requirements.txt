@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+scikit-learn
+pandas
+numpy
+shap
+matplotlib
+joblib
+pydantic
+streamlit
+plotly

@@ -1,0 +1,265 @@
+{
+  "chosen_threshold": 0.383,
+  "test_precision": 0.6085,
+  "test_recall": 0.9127,
+  "test_f1": 0.7302,
+  "test_roc_auc": 0.9919,
+  "test_avg_precision_pr_auc": 0.9223,
+  "test_confusion_matrix": [
+    [
+      8600,
+      148
+    ],
+    [
+      22,
+      230
+    ]
+  ],
+  "test_n": 9000,
+  "test_n_fraud": 252,
+  "validation_cost_at_tuned_threshold_inr": 47856.88,
+  "validation_cost_at_naive_0.5_threshold_inr": 66699.08,
+  "validation_fn_fp_at_tuned": {
+    "missed_fraud": 23,
+    "false_positives": 123
+  },
+  "validation_fn_fp_at_naive": {
+    "missed_fraud": 43,
+    "false_positives": 35
+  },
+  "cost_assumptions": {
+    "cost_per_missed_fraud": "transaction_amount * 1.15 (chargeback fee + admin)",
+    "cost_per_false_positive_inr": 120
+  },
+  "test_estimated_cost_inr": 52517.84,
+  "recall_by_fraud_pattern": {
+    "upi_collect_scam": {
+      "n_cases": 63,
+      "recall": 0.746
+    },
+    "remote_access_session": {
+      "n_cases": 58,
+      "recall": 0.9138
+    },
+    "account_takeover_simswap": {
+      "n_cases": 70,
+      "recall": 0.9857
+    },
+    "mule_cashout_ring": {
+      "n_cases": 61,
+      "recall": 1.0
+    }
+  },
+  "validation_cost_curve": [
+    {
+      "threshold": 0.05,
+      "cost_inr": 793440.0,
+      "missed_fraud": 0,
+      "false_positives": 6612
+    },
+    {
+      "threshold": 0.075,
+      "cost_inr": 620498.42,
+      "missed_fraud": 1,
+      "false_positives": 5157
+    },
+    {
+      "threshold": 0.1,
+      "cost_inr": 476498.41,
+      "missed_fraud": 1,
+      "false_positives": 3957
+    },
+    {
+      "threshold": 0.125,
+      "cost_inr": 343081.09,
+      "missed_fraud": 2,
+      "false_positives": 2828
+    },
+    {
+      "threshold": 0.15,
+      "cost_inr": 252241.09,
+      "missed_fraud": 2,
+      "false_positives": 2071
+    },
+    {
+      "threshold": 0.175,
+      "cost_inr": 181203.92,
+      "missed_fraud": 3,
+      "false_positives": 1471
+    },
+    {
+      "threshold": 0.2,
+      "cost_inr": 137293.03,
+      "missed_fraud": 5,
+      "false_positives": 1064
+    },
+    {
+      "threshold": 0.225,
+      "cost_inr": 110071.31,
+      "missed_fraud": 9,
+      "false_positives": 799
+    },
+    {
+      "threshold": 0.25,
+      "cost_inr": 85578.11,
+      "missed_fraud": 10,
+      "false_positives": 580
+    },
+    {
+      "threshold": 0.275,
+      "cost_inr": 70164.1,
+      "missed_fraud": 11,
+      "false_positives": 440
+    },
+    {
+      "threshold": 0.3,
+      "cost_inr": 63003.88,
+      "missed_fraud": 15,
+      "false_positives": 335
+    },
+    {
+      "threshold": 0.325,
+      "cost_inr": 52039.39,
+      "missed_fraud": 16,
+      "false_positives": 241
+    },
+    {
+      "threshold": 0.35,
+      "cost_inr": 52249.92,
+      "missed_fraud": 19,
+      "false_positives": 186
+    },
+    {
+      "threshold": 0.375,
+      "cost_inr": 49482.25,
+      "missed_fraud": 22,
+      "false_positives": 140
+    },
+    {
+      "threshold": 0.4,
+      "cost_inr": 50024.63,
+      "missed_fraud": 26,
+      "false_positives": 107
+    },
+    {
+      "threshold": 0.425,
+      "cost_inr": 48906.58,
+      "missed_fraud": 29,
+      "false_positives": 77
+    },
+    {
+      "threshold": 0.45,
+      "cost_inr": 53251.69,
+      "missed_fraud": 33,
+      "false_positives": 66
+    },
+    {
+      "threshold": 0.475,
+      "cost_inr": 54264.39,
+      "missed_fraud": 37,
+      "false_positives": 52
+    },
+    {
+      "threshold": 0.5,
+      "cost_inr": 66699.08,
+      "missed_fraud": 43,
+      "false_positives": 35
+    },
+    {
+      "threshold": 0.525,
+      "cost_inr": 70980.27,
+      "missed_fraud": 48,
+      "false_positives": 30
+    },
+    {
+      "threshold": 0.55,
+      "cost_inr": 77369.92,
+      "missed_fraud": 51,
+      "false_positives": 22
+    },
+    {
+      "threshold": 0.575,
+      "cost_inr": 84033.73,
+      "missed_fraud": 55,
+      "false_positives": 16
+    },
+    {
+      "threshold": 0.6,
+      "cost_inr": 94251.11,
+      "missed_fraud": 64,
+      "false_positives": 11
+    },
+    {
+      "threshold": 0.625,
+      "cost_inr": 100518.17,
+      "missed_fraud": 67,
+      "false_positives": 7
+    },
+    {
+      "threshold": 0.65,
+      "cost_inr": 108926.41,
+      "missed_fraud": 73,
+      "false_positives": 6
+    },
+    {
+      "threshold": 0.675,
+      "cost_inr": 125864.57,
+      "missed_fraud": 80,
+      "false_positives": 5
+    },
+    {
+      "threshold": 0.7,
+      "cost_inr": 134670.78,
+      "missed_fraud": 90,
+      "false_positives": 3
+    },
+    {
+      "threshold": 0.725,
+      "cost_inr": 145212.11,
+      "missed_fraud": 99,
+      "false_positives": 1
+    },
+    {
+      "threshold": 0.75,
+      "cost_inr": 161456.85,
+      "missed_fraud": 113,
+      "false_positives": 0
+    },
+    {
+      "threshold": 0.775,
+      "cost_inr": 206038.21,
+      "missed_fraud": 133,
+      "false_positives": 0
+    },
+    {
+      "threshold": 0.8,
+      "cost_inr": 262151.86,
+      "missed_fraud": 152,
+      "false_positives": 0
+    },
+    {
+      "threshold": 0.825,
+      "cost_inr": 316248.4,
+      "missed_fraud": 169,
+      "false_positives": 0
+    },
+    {
+      "threshold": 0.85,
+      "cost_inr": 392842.18,
+      "missed_fraud": 189,
+      "false_positives": 0
+    },
+    {
+      "threshold": 0.875,
+      "cost_inr": 455623.11,
+      "missed_fraud": 206,
+      "false_positives": 0
+    },
+    {
+      "threshold": 0.9,
+      "cost_inr": 530864.85,
+      "missed_fraud": 220,
+      "false_positives": 0
+    }
+  ]
+}

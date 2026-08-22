@@ -1,0 +1,21 @@
+{
+  "amount_zscore":0.1011539921,
+  "new_payee":0.0945041897,
+  "payee_added_to_txn_minutes":0.079680589,
+  "session_duration_sec":0.0526940266,
+  "velocity_24h":0.0477208844,
+  "velocity_1h":0.0352521653,
+  "account_age_days":0.0299410851,
+  "cross_merchant_velocity_1h":0.0285582171,
+  "amount":0.0247470981,
+  "distinct_merchants_24h":0.0202555933,
+  "merchant_risk_score":0.0190286579,
+  "new_device":0.0114439696,
+  "hour_of_day":0.0103407406,
+  "avg_historical_ticket":0.0064420656,
+  "sim_or_device_change_recent":0.0045660551,
+  "chargeback_history_count":0.0009289962,
+  "is_international":0.0001557625,
+  "billing_shipping_mismatch":0.0001297922,
+  "geo_mismatch":0.0001099403
+}
