@@ -19,10 +19,10 @@ import plotly.express as px
 import shap
 import streamlit as st
 
-from ml.drift import compute_drift_report, psi_verdict
-
 BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
+
+from ml.drift import compute_drift_report, psi_verdict
 
 st.set_page_config(page_title="AI Risk Manager", page_icon="\U0001F6E1\ufe0f", layout="wide")
 
