@@ -75,13 +75,13 @@ operandi are payments-specific, not repurposed network-security ones.
 
 | Metric | Value |
 |---|---|
-| Precision | 0.609 |
-| Recall | 0.913 |
-| F1 | 0.730 |
-| ROC-AUC | 0.992 |
-| PR-AUC (avg precision) | 0.922 |
+| Precision | 0.545 |
+| Recall | 0.909 |
+| F1 | 0.682 |
+| ROC-AUC | 0.990 |
+| PR-AUC (avg precision) | 0.917 |
 
-Confusion matrix `[[TN, FP], [FN, TP]]`: `[[8600, 148], [22, 230]]`
+Confusion matrix `[[TN, FP], [FN, TP]]`: `[[8557, 191], [23, 229]]`
 
 **This is a real, non-trivial result, not an artifact of an easy
 simulation.** An earlier version of the data generator applied fraud
@@ -90,8 +90,25 @@ signatures as hard, deterministic overrides — that version scored
 not that the model was good. The generator was rebuilt so fraud-pattern
 signals are probabilistic distribution *shifts* with heavy overlap
 against legit traffic (lognormal tails, ~15% of fraud cases deliberately
-"quiet," ~5% of legit traffic deliberately noisy), which is why
-precision sits at 61% rather than 100% — a more honest number.
+"quiet," ~5% of legit traffic deliberately noisy).
+
+**A second, separate bug was found and fixed after that:** the
+IsolationForest's raw-anomaly-score-to-0..1 mapping was originally
+recomputed independently for every batch it scored (validation, test,
+and — separately again — a hand-guessed static formula at inference
+time). This meant the same underlying anomaly level got silently
+different normalized scores depending on context, which in practice
+meant **zero transactions in the entire held-out test set ever reached
+the ALLOW decision** — everything landed in REVIEW or BLOCK. Fixed by
+calibrating the raw-score range **once**, on the training set, and
+persisting those bounds (`iso_raw_low`/`iso_raw_high` in
+`models/threshold.json`) for reuse everywhere — training, validation,
+test, and live inference all now score on the same scale. Post-fix, a
+genuine legit transaction scores ~0.01 (ALLOW) instead of ~0.25
+(borderline REVIEW), and the held-out test set shows a realistic
+87.5% ALLOW / 7.8% REVIEW / 4.7% BLOCK split instead of 0% ALLOW.
+Precision moved from 0.609 to 0.545 as a result — a small drop, and the
+honest number given the fix, not a regression to hide.
 
 ### Recall by fraud pattern — the actual finding worth presenting
 
@@ -99,8 +116,8 @@ precision sits at 61% rather than 100% — a more honest number.
 |---|---|---|
 | Mule cash-out ring | 61 | **100%** — cross-merchant velocity is a strong, hard-to-fake signal |
 | Account-takeover/SIM-swap | 70 | 98.6% |
-| Remote-access session | 58 | 91.4% |
-| **UPI collect-request scam** | 63 | **74.6%** — hardest to catch |
+| Remote-access session | 58 | 93.1% |
+| **UPI collect-request scam** | 63 | **71.4%** — hardest to catch |
 
 The UPI collect-scam is deliberately the hardest case: it has no
 velocity spike, no device change, no cross-merchant footprint — it's a
@@ -117,10 +134,10 @@ blended recall number that hides where the model actually struggles.
 - **False positive (wrongly blocked):** flat ₹120 (support cost + margin/goodwill hit)
 
 Tuning the threshold against this cost function instead of a naive 0.5
-cutoff reduced estimated validation-set cost from **₹66,699 → ₹47,857**
-(~28% reduction). See `reports/cost_curve.png` — the cost curve is
-clearly U-shaped, and the naive 0.5 cutoff sits visibly past the minimum
-(too conservative, letting avoidable fraud losses through).
+cutoff reduced estimated validation-set cost from **₹55,211 → ₹47,442**
+(~14.1% reduction). See `reports/cost_curve.png`, or the interactive
+**Cost Explorer** tab in the dashboard, which recomputes this live for
+any cost assumptions you drag the sliders to — not just the defaults.
 `COST_FN_MULTIPLIER` and `COST_FP_FLAT` in `ml/train.py` are
 placeholders — swap in real merchant numbers if available.
 
@@ -146,13 +163,13 @@ transactions** — cited research suggests roughly one in six customers
 has had a valid transaction wrongly declined in the past year.<sup>[1]</sup>
 
 This detector's false-positive rate **across all transactions** is
-**1.64%** (148 wrongly-flagged out of 9,000 held-out transactions) —
-well under that benchmark. The `precision = 0.609` figure reported
+**2.12%** (191 wrongly-flagged out of 9,000 held-out transactions) —
+well under that benchmark. The `precision = 0.545` figure reported
 above is a different, stricter number: it's the false-positive rate
-**only among transactions already flagged as suspicious** (148 FP out
-of 378 total flags = 39.2%). Both numbers are true; they answer
+**only among transactions already flagged as suspicious** (191 FP out
+of 420 total flags = 45.5%). Both numbers are true; they answer
 different questions. A judge or reviewer comparing this system to
-industry norms should use the all-transactions figure (1.64%) — the
+industry norms should use the all-transactions figure (2.12%) — the
 higher figure just reflects that flagged transactions are, by
 construction, the hardest and most ambiguous cases.
 
@@ -171,15 +188,15 @@ distinguishing advantages over manual review.<sup>[1]</sup>
 ## Illustrative ROI at scale
 
 Using this project's own validation-set numbers (cost reduced from
-₹66,699 → ₹47,857 across 9,000 transactions via cost-aware thresholding
-= ₹2.09 saved per transaction on average), extrapolated linearly for
+₹55,211 → ₹47,442 across 9,000 transactions via cost-aware thresholding
+= ₹0.86 saved per transaction on average), extrapolated linearly for
 pitch purposes:
 
 | Merchant volume | Monthly savings (illustrative) | Annualized |
 |---|---|---|
-| 100K txns/month | ~₹2.1 lakh | ~₹25.1 lakh |
-| 1M txns/month | ~₹20.9 lakh | ~₹2.51 crore |
-| 10M txns/month | ~₹2.09 crore | ~₹25.1 crore |
+| 100K txns/month | ~₹0.86 lakh | ~₹10.4 lakh |
+| 1M txns/month | ~₹8.6 lakh | ~₹1.04 crore |
+| 10M txns/month | ~₹86.3 lakh | ~₹10.4 crore |
 
 **This is a linear extrapolation from a synthetic validation set, not a
 real-world projection** — real savings depend on the merchant's actual
@@ -217,10 +234,32 @@ This is the actual demo surface — a Streamlit app, not just a bare API:
 - **Model Performance** — precision/recall/ROC-AUC cards, the
   recall-by-fraud-pattern chart (the honest breakdown showing UPI scams
   are hardest to catch), and the cost-curve/SHAP images.
-- **Review Queue Demo** — pulls a random batch of held-out transactions,
-  scores all of them, and shows the sorted queue an actual fraud analyst
-  would work through, color-coded by decision, with a summary of how much
-  real fraud was caught vs. missed in that batch.
+- **Review Queue Demo** — pulls a random batch from the **genuinely
+  held-out test set** (`data/holdout_test.csv`, generated by
+  `ml/train.py` — rows the model never touched during training or
+  threshold tuning), scores all of them, and shows the sorted queue an
+  actual fraud analyst would work through, color-coded by decision, with
+  a summary of how much real fraud was caught vs. missed in that batch.
+- **Data Drift Monitor** — fraud patterns aren't static; scammers adapt
+  and new variants emerge. This tab uses Population Stability Index (PSI)
+  to compare a live transaction batch against the training distribution
+  and flags when the model's world-view no longer matches reality. Two
+  buttons demo this directly: "Simulate normal traffic" (should stay
+  stable) and "Simulate a fraud wave evolving" (artificially shifts
+  cross-merchant velocity and payee-timing features to show what real
+  drift looks like and why it'd trigger a retrain).
+- **Batch Score (CSV)** — upload a CSV of your own transactions (a
+  template with the right columns is one click away) and get all of them
+  scored at once, with a downloadable results file. This is the real
+  test of generalization — not just the 4 built-in presets, but whatever
+  data you bring, scored live via the same model and SHAP explainer used
+  everywhere else in the app.
+- **Cost Explorer** — the cost curve elsewhere in this README is fixed
+  to one set of assumptions (₹120 per false positive, 1.15× amount per
+  missed fraud). This tab makes those assumptions interactive: drag the
+  sliders to your own numbers and watch the optimal threshold and cost
+  curve recompute live against the validation set — turns a one-time
+  analysis into something a reviewer can actually poke at.
 
 `POST /score` (FastAPI) and the dashboard both call the same underlying
 model — the dashboard is a UI layer on top of the same detector.
@@ -246,3 +285,8 @@ model — the dashboard is a UI layer on top of the same detector.
   learned the threshold could shape transactions to stay under it.
   That's the natural next-stage "Abuse-Ring Sentinel" (graph-clustering)
   extension, not attempted here.
+- The drift monitor (`ml/drift.py`) currently compares live batches
+  against the same static training distribution — in production this
+  reference window should itself roll forward periodically, otherwise
+  the monitor eventually flags "drift" against a distribution that's
+  intentionally stale rather than the most recent stable period.

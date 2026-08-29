@@ -81,10 +81,23 @@ def main():
         n_estimators=200, contamination=0.03, random_state=42, n_jobs=-1
     )
     iso.fit(X_train[y_train == 0])
-    # score_samples: higher = more normal. Flip & min-max scale to 0..1 risk.
+
+    # --- Calibrate IsolationForest's raw score -> 0..1 risk mapping ONCE,
+    # using a FIXED reference range (1st/99th percentile of raw scores on
+    # the training set), and reuse that SAME fixed range everywhere --
+    # validation, test, and live inference. This matters: recomputing
+    # min/max separately for every batch (the earlier version of this
+    # script did this) means the same underlying anomaly level gets
+    # different normalized scores depending on what else is in that
+    # particular batch -- silently miscalibrating validation vs test vs
+    # live inference against each other. Percentiles (not raw min/max)
+    # avoid a single extreme outlier compressing the whole usable range.
+    _raw_ref = -iso.score_samples(X_train)
+    ISO_RAW_LOW, ISO_RAW_HIGH = np.percentile(_raw_ref, [1, 99])
+
     def iso_risk(Xs):
         raw = -iso.score_samples(Xs)
-        return (raw - raw.min()) / (raw.max() - raw.min() + 1e-9)
+        return np.clip((raw - ISO_RAW_LOW) / (ISO_RAW_HIGH - ISO_RAW_LOW + 1e-9), 0, 1)
 
     # --- Supervised classifier
     rf = RandomForestClassifier(
@@ -169,7 +182,27 @@ def main():
     joblib.dump(rf, BASE / "models" / "rf_classifier.pkl")
     joblib.dump(iso, BASE / "models" / "iso_forest.pkl")
     with open(BASE / "models" / "threshold.json", "w") as f:
-        json.dump({"threshold": best_threshold, "features": FEATURES}, f)
+        json.dump({
+            "threshold": best_threshold,
+            "features": FEATURES,
+            "iso_raw_low": float(ISO_RAW_LOW),
+            "iso_raw_high": float(ISO_RAW_HIGH),
+        }, f)
+
+    # --- Persist the TRUE held-out test set and validation set as their own
+    # files. Why this matters: without this, a dashboard/demo that wants to
+    # show "the model scoring transactions it hasn't seen" has no choice but
+    # to sample from the full transactions.csv, which includes rows the
+    # model WAS trained on -- silently undermining the "held-out" claim.
+    # Saving these explicitly means every downstream demo (review queue,
+    # cost-curve explorer) can honestly use genuinely unseen data.
+    test_export = df.loc[X_test.index].copy()
+    test_export["risk_score"] = test_scores
+    test_export.to_csv(BASE / "data" / "holdout_test.csv", index=False)
+
+    val_export = df.loc[X_val.index].copy()
+    val_export["risk_score"] = val_scores
+    val_export.to_csv(BASE / "data" / "validation_set.csv", index=False)
 
     return metrics
 

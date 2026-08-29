@@ -43,9 +43,32 @@ def load_metrics():
 def load_dataset():
     return pd.read_csv(BASE / "data" / "transactions.csv")
 
+@st.cache_data
+def load_holdout_test():
+    """The TRUE held-out test set -- rows the model never saw during
+    training or threshold tuning. This is what the Review Queue and any
+    'genuinely unseen data' demo should use, NOT the full transactions.csv
+    (which includes rows the model was trained on)."""
+    path = BASE / "data" / "holdout_test.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
+@st.cache_data
+def load_validation_set():
+    """Validation set with pre-computed risk_score -- used for the live
+    interactive cost-curve explorer so it doesn't need to recompute
+    predictions from scratch on every slider move."""
+    path = BASE / "data" / "validation_set.csv"
+    if not path.exists():
+        return None
+    return pd.read_csv(path)
+
 rf, iso, cfg, explainer = load_models()
 FEATURES = cfg["features"]
 THRESHOLD = cfg["threshold"]
+ISO_RAW_LOW = cfg["iso_raw_low"]
+ISO_RAW_HIGH = cfg["iso_raw_high"]
 REVIEW_BAND = 0.15
 metrics = load_metrics()
 
@@ -100,7 +123,8 @@ FEATURE_LABELS = {
 
 def iso_risk(row_df):
     raw = -iso.score_samples(row_df)[0]
-    return float(np.clip((raw + 0.6) / 1.2, 0, 1))
+    # SAME fixed calibration range as train.py/main.py -- see comment there.
+    return float(np.clip((raw - ISO_RAW_LOW) / (ISO_RAW_HIGH - ISO_RAW_LOW + 1e-9), 0, 1))
 
 
 def guess_pattern(reasons):
@@ -140,7 +164,10 @@ def score_transaction(values: dict):
 st.title("\U0001F6E1\ufe0f AI Risk Manager")
 st.caption("Fraud-spike detector for Indian digital-payment fraud -- UPI scams, SIM-swap takeover, remote-access sessions, mule rings. Defense-only: scores and explains, never simulates or optimizes attacks.")
 
-tab1, tab2, tab3, tab4 = st.tabs(["\U0001F50E Score a Transaction", "\U0001F4CA Model Performance", "\U0001F4CB Review Queue Demo", "\U0001F4C9 Data Drift Monitor"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "\U0001F50E Score a Transaction", "\U0001F4CA Model Performance", "\U0001F4CB Review Queue Demo",
+    "\U0001F4C9 Data Drift Monitor", "\U0001F4C1 Batch Score (CSV)", "\U0001F4B0 Cost Explorer",
+])
 
 # ---- TAB 1: Live scorer ----------------------------------------------
 with tab1:
@@ -266,11 +293,15 @@ with tab2:
 # ---- TAB 3: Review queue demo ------------------------------------------
 with tab3:
     st.subheader("Review queue -- what an analyst would actually see")
-    st.caption("A random sample of held-out transactions, scored and sorted by risk. This is the human-in-the-loop layer: BLOCK/REVIEW cases land here instead of vanishing into an automated decision.")
+    holdout = load_holdout_test()
+    if holdout is not None:
+        st.caption("A random sample from the **genuinely held-out test set** -- rows the model never saw during training or threshold tuning. Scored and sorted by risk. This is the human-in-the-loop layer: BLOCK/REVIEW cases land here instead of vanishing into an automated decision.")
+    else:
+        st.caption("⚠️ data/holdout_test.csv not found -- falling back to the full dataset (re-run `python ml/train.py` to generate a proper held-out sample).")
 
     n_sample = st.slider("Sample size", 10, 100, 30)
     if st.button("Pull a fresh batch"):
-        df = load_dataset()
+        df = holdout if holdout is not None else load_dataset()
         sample = df.sample(n_sample, random_state=None).reset_index(drop=True)
         results = []
         for _, row in sample.iterrows():
@@ -383,3 +414,166 @@ with tab4:
             st.success("No features show meaningful drift — the model's training distribution still matches live traffic.")
     else:
         st.info("Click one of the buttons above to pull a batch and check for drift.")
+
+# ---- TAB 5: Batch score via CSV upload -----------------------------------
+with tab5:
+    st.subheader("Batch score your own transactions")
+    st.caption(
+        "Upload a CSV of transactions and get all of them scored at once. "
+        "This is the honest test of whether the system generalizes -- not just "
+        "the 4 built-in presets, but whatever data you bring."
+    )
+
+    template_df = pd.DataFrame([PRESETS["Legit transaction"]])
+    st.download_button(
+        "Download a template CSV (with 1 example row)",
+        data=template_df.to_csv(index=False),
+        file_name="transaction_template.csv",
+        mime="text/csv",
+    )
+
+    uploaded = st.file_uploader("Upload transactions CSV", type="csv")
+    MAX_BATCH_ROWS = 2000
+
+    if uploaded is not None:
+        try:
+            batch_df = pd.read_csv(uploaded)
+        except Exception as e:
+            st.error(f"Couldn't read that file as a CSV: {e}")
+            batch_df = None
+
+        if batch_df is not None:
+            missing = [f for f in FEATURES if f not in batch_df.columns]
+            if missing:
+                st.error(f"Missing required column(s): {', '.join(missing)}. "
+                         f"Download the template above to see the exact format needed.")
+            else:
+                if len(batch_df) > MAX_BATCH_ROWS:
+                    st.warning(f"File has {len(batch_df)} rows — scoring only the first {MAX_BATCH_ROWS} to keep this responsive.")
+                    batch_df = batch_df.head(MAX_BATCH_ROWS)
+
+                with st.spinner(f"Scoring {len(batch_df)} transactions..."):
+                    X_batch = batch_df[FEATURES].copy()
+                    rf_p = rf.predict_proba(X_batch)[:, 1]
+                    iso_raw = -iso.score_samples(X_batch)
+                    iso_p = np.clip((iso_raw - ISO_RAW_LOW) / (ISO_RAW_HIGH - ISO_RAW_LOW + 1e-9), 0, 1)
+                    risk_scores = 0.7 * rf_p + 0.3 * iso_p
+
+                    decisions = np.where(
+                        risk_scores >= THRESHOLD, "BLOCK",
+                        np.where(risk_scores >= THRESHOLD - REVIEW_BAND, "REVIEW", "ALLOW")
+                    )
+
+                    # SHAP for the whole batch in one call -- much faster than
+                    # per-row explainer calls, and TreeExplainer supports this directly
+                    sv = explainer.shap_values(X_batch)
+                    sv_all = sv[1] if isinstance(sv, list) else sv[:, :, 1]
+
+                    top_reasons_list = []
+                    pattern_list = []
+                    for i in range(len(X_batch)):
+                        row_reasons = sorted(
+                            [{"feature": f, "impact": round(float(v), 4)} for f, v in zip(FEATURES, sv_all[i])],
+                            key=lambda r: -abs(r["impact"])
+                        )
+                        top_reasons_list.append(row_reasons[0]["feature"] if row_reasons else "")
+                        pattern_list.append(guess_pattern(row_reasons[:8]))
+
+                    out_df = batch_df.copy()
+                    out_df["risk_score"] = np.round(risk_scores, 4)
+                    out_df["decision"] = decisions
+                    out_df["top_reason"] = top_reasons_list
+                    out_df["likely_pattern"] = pattern_list
+                    out_df = out_df.sort_values("risk_score", ascending=False)
+
+                st.success(f"Scored {len(out_df)} transactions.")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Flagged BLOCK", int((out_df["decision"] == "BLOCK").sum()))
+                c2.metric("Flagged REVIEW", int((out_df["decision"] == "REVIEW").sum()))
+                c3.metric("ALLOW", int((out_df["decision"] == "ALLOW").sum()))
+
+                def highlight_batch(row):
+                    color = {"BLOCK": "background-color: #fdedec", "REVIEW": "background-color: #fef5e7", "ALLOW": "background-color: #eafaf1"}[row["decision"]]
+                    return [color] * len(row)
+                st.dataframe(out_df.style.apply(highlight_batch, axis=1), use_container_width=True, height=450)
+
+                st.download_button(
+                    "Download scored results as CSV",
+                    data=out_df.to_csv(index=False),
+                    file_name="scored_transactions.csv",
+                    mime="text/csv",
+                )
+    else:
+        st.info("Upload a CSV to score it, or try the template above as a starting point.")
+
+# ---- TAB 6: Interactive cost explorer -------------------------------------
+with tab6:
+    st.subheader("Cost-assumption explorer")
+    st.caption(
+        "The threshold used everywhere else in this app was tuned against ONE set of cost "
+        "assumptions (₹120 per false positive, 1.15× transaction amount per missed fraud). "
+        "Real merchants have different economics. Drag the sliders below to see how the "
+        "optimal threshold shifts for different assumptions — computed live on the "
+        "validation set, not pre-baked."
+    )
+
+    val_set = load_validation_set()
+    if val_set is None:
+        st.warning("⚠️ data/validation_set.csv not found — re-run `python ml/train.py` to generate it.")
+    else:
+        c1, c2 = st.columns(2)
+        fn_multiplier = c1.slider(
+            "False-negative cost multiplier (× transaction amount)", 1.0, 3.0, 1.15, 0.05,
+            help="Cost of missing a fraud, as a multiple of the transaction amount. Higher = fraud losses hurt more relative to false alarms."
+        )
+        fp_flat = c2.slider(
+            "False-positive flat cost (₹)", 20, 500, 120, 10,
+            help="Cost of wrongly blocking a genuine transaction — support cost, lost margin, customer annoyance."
+        )
+
+        y_true = val_set["is_fraud"].values
+        amounts = val_set["amount"].values
+        scores = val_set["risk_score"].values
+
+        thresholds = np.linspace(0.01, 0.95, 190)
+        costs, fns, fps = [], [], []
+        for t in thresholds:
+            pred = (scores >= t).astype(int)
+            fn_mask = (y_true == 1) & (pred == 0)
+            fp_mask = (y_true == 0) & (pred == 1)
+            cost = (amounts[fn_mask] * fn_multiplier).sum() + fp_mask.sum() * fp_flat
+            costs.append(cost)
+            fns.append(fn_mask.sum())
+            fps.append(fp_mask.sum())
+
+        costs = np.array(costs)
+        best_idx = int(np.argmin(costs))
+        best_t = thresholds[best_idx]
+        best_cost = costs[best_idx]
+
+        naive_idx = int(np.argmin(np.abs(thresholds - 0.5)))
+        naive_cost = costs[naive_idx]
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Your optimal threshold", f"{best_t:.3f}")
+        c2.metric("Cost at your optimal threshold", f"₹{best_cost:,.0f}")
+        c3.metric("Cost at naive 0.5 threshold", f"₹{naive_cost:,.0f}",
+                  delta=f"-₹{naive_cost - best_cost:,.0f}" if naive_cost > best_cost else f"+₹{best_cost - naive_cost:,.0f}",
+                  delta_color="inverse")
+
+        fig5 = go.Figure()
+        fig5.add_trace(go.Scatter(x=thresholds, y=costs, mode="lines", line=dict(color="#c0392b", width=2), name="Cost"))
+        fig5.add_vline(x=best_t, line_dash="dash", line_color="#2c3e50", annotation_text="your optimal")
+        fig5.add_vline(x=0.5, line_dash="dot", line_color="#7f8c8d", annotation_text="naive 0.5")
+        fig5.update_layout(
+            xaxis_title="Decision threshold", yaxis_title="Estimated cost (₹) on validation set",
+            height=380, margin=dict(l=10, r=10, t=30, b=10),
+        )
+        st.plotly_chart(fig5, use_container_width=True)
+
+        st.caption(
+            f"At your chosen cost assumptions, the optimal threshold is **{best_t:.3f}** "
+            f"({int(fns[best_idx])} missed fraud, {int(fps[best_idx])} false positives on this validation set) — "
+            f"try pushing the false-negative multiplier higher to see the optimal threshold drop "
+            f"(the system gets more aggressive about blocking when missed fraud is assumed to hurt more)."
+        )

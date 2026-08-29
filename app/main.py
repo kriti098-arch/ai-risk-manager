@@ -23,6 +23,8 @@ iso = joblib.load(BASE / "models/iso_forest.pkl")
 cfg = json.loads((BASE / "models/threshold.json").read_text())
 FEATURES = cfg["features"]
 THRESHOLD = cfg["threshold"]
+ISO_RAW_LOW = cfg["iso_raw_low"]
+ISO_RAW_HIGH = cfg["iso_raw_high"]
 REVIEW_BAND = 0.15  # score within [threshold-band, threshold) -> manual review, not auto-block
 
 explainer = shap.TreeExplainer(rf)
@@ -30,9 +32,11 @@ explainer = shap.TreeExplainer(rf)
 
 def iso_risk(row_df: pd.DataFrame) -> float:
     raw = -iso.score_samples(row_df)[0]
-    # static min/max captured at train time would be more correct in prod;
-    # here we clip against a reasonable observed range for the demo
-    return float(np.clip((raw + 0.6) / 1.2, 0, 1))
+    # Uses the SAME fixed calibration range computed once at training time
+    # (persisted in models/threshold.json) rather than a guessed static
+    # formula -- keeps inference-time scores on the same scale the
+    # threshold was actually tuned against.
+    return float(np.clip((raw - ISO_RAW_LOW) / (ISO_RAW_HIGH - ISO_RAW_LOW + 1e-9), 0, 1))
 
 
 @app.get("/health")
