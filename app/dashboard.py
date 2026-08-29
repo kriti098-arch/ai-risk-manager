@@ -23,6 +23,7 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
 from ml.drift import compute_drift_report, psi_verdict
+from app.ai_explainer import generate_ai_explanation
 
 st.set_page_config(page_title="AI Risk Manager", page_icon="\U0001F6E1\ufe0f", layout="wide")
 
@@ -209,6 +210,18 @@ with tab1:
         st.subheader("Risk assessment")
         if submitted:
             risk, decision, reasons, pattern = score_transaction(vals)
+            # Persist into session_state -- a NEW transaction was just scored, so
+            # any previous AI explanation belongs to the OLD transaction and must
+            # be cleared, not shown stale against these new results.
+            st.session_state["score_result"] = {
+                "vals": vals, "risk": risk, "decision": decision,
+                "reasons": reasons, "pattern": pattern,
+            }
+            st.session_state.pop("ai_explanation", None)
+
+        if "score_result" in st.session_state:
+            sr = st.session_state["score_result"]
+            vals, risk, decision, reasons, pattern = sr["vals"], sr["risk"], sr["decision"], sr["reasons"], sr["pattern"]
 
             color = {"BLOCK": "#e74c3c", "REVIEW": "#f39c12", "ALLOW": "#27ae60"}[decision]
             fig = go.Figure(go.Indicator(
@@ -251,6 +264,29 @@ with tab1:
                 st.warning("This transaction would be sent to a **human review queue** -- not auto-blocked, not auto-allowed.")
             else:
                 st.success("This transaction would be **allowed** to proceed normally.")
+
+            st.markdown("#### 🤖 AI-generated explanation")
+            st.caption("The chart above is the real, exact SHAP explanation. This button asks a language model (Gemini) to translate that SAME data into a plain-English paragraph for a non-technical reader -- it doesn't re-decide anything, only explains the decision already made above.")
+            if st.button("Generate AI explanation", key="ai_explain_btn"):
+                try:
+                    gemini_key = st.secrets.get("GEMINI_API_KEY", "")
+                except Exception:
+                    # st.secrets raises (rather than returning the default) when
+                    # no secrets.toml exists at all -- which is the normal state
+                    # before a key has been configured, not an error condition.
+                    gemini_key = ""
+                with st.spinner("Asking Gemini to explain this..."):
+                    explanation = generate_ai_explanation(
+                        vals, risk, decision, reasons, pattern, api_key=gemini_key
+                    )
+                st.session_state["ai_explanation"] = explanation
+
+            if "ai_explanation" in st.session_state:
+                explanation = st.session_state["ai_explanation"]
+                if explanation.startswith("⚠️"):
+                    st.warning(explanation)
+                else:
+                    st.info(explanation)
         else:
             st.info("Pick a preset or fill in details on the left, then click **Score this transaction**.")
 
