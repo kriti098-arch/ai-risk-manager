@@ -24,6 +24,7 @@ sys.path.insert(0, str(BASE))
 
 from ml.drift import compute_drift_report, psi_verdict
 from app.ai_explainer import generate_ai_explanation
+from app.fraud_reports import load_reports, add_report, merchant_risk_summary
 
 st.set_page_config(page_title="AI Risk Manager", page_icon="\U0001F6E1\ufe0f", layout="wide")
 
@@ -165,9 +166,10 @@ def score_transaction(values: dict):
 st.title("\U0001F6E1\ufe0f AI Risk Manager")
 st.caption("Fraud-spike detector for Indian digital-payment fraud -- UPI scams, SIM-swap takeover, remote-access sessions, mule rings. Defense-only: scores and explains, never simulates or optimizes attacks.")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "\U0001F50E Score a Transaction", "\U0001F4CA Model Performance", "\U0001F4CB Review Queue Demo",
     "\U0001F4C9 Data Drift Monitor", "\U0001F4C1 Batch Score (CSV)", "\U0001F4B0 Cost Explorer",
+    "\U0001F6A9 Report Confirmed Fraud",
 ])
 
 # ---- TAB 1: Live scorer ----------------------------------------------
@@ -613,3 +615,69 @@ with tab6:
             f"try pushing the false-negative multiplier higher to see the optimal threshold drop "
             f"(the system gets more aggressive about blocking when missed fraud is assumed to hurt more)."
         )
+
+# ---- TAB 7: Report confirmed fraud (the feedback loop) --------------------
+with tab7:
+    st.subheader("Report confirmed fraud")
+    st.caption(
+        "A risk model that only decides at the moment of a transaction has no way to learn "
+        "\"we got this wrong, it turned out to be fraud after the fact\" — which is how a lot of real "
+        "fraud actually gets confirmed (a customer disputes a charge days later, a bank flags a "
+        "chargeback). This closes that loop: log a confirmed-fraud report against a transaction and "
+        "merchant, and repeated reports automatically flag that merchant for enhanced monitoring. "
+        "In a real system, accumulated reports like these are exactly what would feed periodic model retraining."
+    )
+
+    prefill = st.session_state.get("score_result")
+    use_prefill = False
+    if prefill:
+        use_prefill = st.checkbox(
+            f"Prefill from the transaction you just scored (risk={prefill['risk']:.1%}, decision={prefill['decision']})",
+            value=False,
+        )
+
+    with st.form("report_fraud_form"):
+        c1, c2 = st.columns(2)
+        merchant_id = c1.text_input("Merchant ID / name", value="")
+        transaction_amount = c2.number_input(
+            "Transaction amount (₹)", min_value=0.0,
+            value=float(prefill["vals"]["amount"]) if use_prefill and prefill else 0.0,
+        )
+        transaction_date = c1.text_input("Transaction date (optional)", value="")
+        risk_score_at_time = prefill["risk"] if use_prefill and prefill else None
+        decision_at_time = prefill["decision"] if use_prefill and prefill else None
+        if use_prefill and prefill:
+            c2.markdown(f"Risk score at the time: **{prefill['risk']:.1%}** ({prefill['decision']})")
+        reason = st.text_area("Reason this is being reported as fraud", value="")
+        submitted_report = st.form_submit_button("Submit report", type="primary")
+
+    if submitted_report:
+        if not merchant_id.strip() or not reason.strip():
+            st.error("Merchant ID and reason are required.")
+        else:
+            add_report(
+                BASE, merchant_id, transaction_amount, transaction_date,
+                risk_score_at_time, decision_at_time, reason,
+            )
+            st.success("Report logged.")
+            st.rerun()  # load_reports() reads fresh from disk each call (not cached), rerun just refreshes the display immediately
+
+    st.markdown("#### All reports logged")
+    reports_df = load_reports(BASE)
+    if reports_df.empty:
+        st.info("No fraud reports logged yet — submit one above.")
+    else:
+        st.dataframe(reports_df.sort_values("reported_at", ascending=False), use_container_width=True, height=250)
+
+        st.markdown("#### Merchant risk summary")
+        summary_df = merchant_risk_summary(reports_df)
+        st.dataframe(summary_df, use_container_width=True, height=200)
+        st.caption("Merchants with 2+ confirmed reports are automatically flagged for enhanced monitoring — this is the concrete mechanism for \"tagging a merchant\" after fraud is discovered.")
+
+    st.markdown("---")
+    st.caption(
+        "⚠️ **Persistence note:** reports are saved to a CSV file (`data/fraud_reports.csv`) on disk. "
+        "This works correctly for a local run or within a single live Streamlit Cloud session, but is "
+        "**not durable across a cloud redeploy/reboot** — a production version of this would write to "
+        "a real database. This demonstrates the workflow and concept, not a production-grade audit log."
+    )

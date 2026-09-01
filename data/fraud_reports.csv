@@ -1,0 +1,5 @@
+report_id,reported_at,merchant_id,transaction_amount,transaction_date,risk_score_at_time,decision_at_time,reason,status
+4872ddbf,2026-09-01T18:42:46,QuickCart Electronics,8500.0,2026-08-15,0.44,REVIEW,Customer confirmed they never approved this UPI collect request -- classic collect-scam pattern.,Reported
+62ab851d,2026-09-01T18:42:46,QuickCart Electronics,3200.0,2026-08-19,0.61,BLOCK,Bank chargeback confirmed fraud -- same merchant flagged again within a week.,Reported
+2819bef2,2026-09-01T18:42:46,QuickCart Electronics,5100.0,2026-08-24,0.38,REVIEW,Third confirmed case -- pattern suggests this merchant is a target for repeated scam attempts.,Reported
+dcd473bd,2026-09-01T18:42:46,Fresh Grocers Online,650.0,2026-08-21,0.15,ALLOW,Customer reported unrecognized payment after account SIM-swap; bank confirmed account takeover.,Reported
