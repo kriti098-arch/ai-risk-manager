@@ -166,6 +166,20 @@ def main():
         }
     metrics["recall_by_fraud_pattern"] = recall_by_pattern
 
+    # --- Baseline "suspicious rate" -- the fraction of NORMAL, unattacked
+    # traffic that lands in REVIEW or BLOCK (not ALLOW). This is the
+    # reference point the Spike-Rate Monitor compares live windows against:
+    # if a batch of transactions shows a suspicious rate significantly
+    # ABOVE this baseline, that's a fraud-spike/attack-wave signal, distinct
+    # from the Data Drift Monitor (which checks whether individual FEATURE
+    # distributions have shifted, not whether the overall RATE of flagged
+    # activity has surged). Computed once on the held-out test set, at the
+    # SAME threshold used everywhere else, and persisted for reuse.
+    REVIEW_BAND_CONST = 0.15
+    test_suspicious = (test_scores >= (best_threshold - REVIEW_BAND_CONST)).astype(int)
+    baseline_suspicious_rate = float(test_suspicious.mean())
+    metrics["baseline_suspicious_rate"] = round(baseline_suspicious_rate, 4)
+
     # --- Cost curve across a threshold sweep, for the sensitivity chart
     cost_curve = []
     for t in np.linspace(0.05, 0.9, 35):
@@ -187,6 +201,7 @@ def main():
             "features": FEATURES,
             "iso_raw_low": float(ISO_RAW_LOW),
             "iso_raw_high": float(ISO_RAW_HIGH),
+            "baseline_suspicious_rate": baseline_suspicious_rate,
         }, f)
 
     # --- Persist the TRUE held-out test set and validation set as their own

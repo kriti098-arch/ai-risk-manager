@@ -23,6 +23,7 @@ BASE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE))
 
 from ml.drift import compute_drift_report, psi_verdict
+from ml.spike_monitor import spike_z_score, spike_verdict
 from app.ai_explainer import generate_ai_explanation
 from app.fraud_reports import load_reports, add_report, merchant_risk_summary
 
@@ -72,6 +73,7 @@ THRESHOLD = cfg["threshold"]
 ISO_RAW_LOW = cfg["iso_raw_low"]
 ISO_RAW_HIGH = cfg["iso_raw_high"]
 REVIEW_BAND = 0.15
+BASELINE_SUSPICIOUS_RATE = cfg.get("baseline_suspicious_rate", 0.125)
 metrics = load_metrics()
 
 PRESETS = {
@@ -166,10 +168,10 @@ def score_transaction(values: dict):
 st.title("\U0001F6E1\ufe0f AI Risk Manager")
 st.caption("Fraud-spike detector for Indian digital-payment fraud -- UPI scams, SIM-swap takeover, remote-access sessions, mule rings. Defense-only: scores and explains, never simulates or optimizes attacks.")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "\U0001F50E Score a Transaction", "\U0001F4CA Model Performance", "\U0001F4CB Review Queue Demo",
     "\U0001F4C9 Data Drift Monitor", "\U0001F4C1 Batch Score (CSV)", "\U0001F4B0 Cost Explorer",
-    "\U0001F6A9 Report Confirmed Fraud",
+    "\U0001F6A9 Report Confirmed Fraud", "\U0001F4C8 Spike-Rate Monitor",
 ])
 
 # ---- TAB 1: Live scorer ----------------------------------------------
@@ -681,3 +683,87 @@ with tab7:
         "**not durable across a cloud redeploy/reboot** — a production version of this would write to "
         "a real database. This demonstrates the workflow and concept, not a production-grade audit log."
     )
+
+# ---- TAB 8: Spike-rate monitor ---------------------------------------------
+with tab8:
+    st.subheader("Spike-rate monitor")
+    st.caption(
+        "The Data Drift Monitor asks: do individual FEATURE distributions look different from training? "
+        "This asks a different question: regardless of which features moved, is the overall RATE of "
+        "transactions landing in REVIEW/BLOCK unusually high right now, compared to normal baseline traffic? "
+        "A coordinated attack wave can spike this rate sharply even before there's enough volume to show up "
+        "clearly as feature drift — this is the earlier, coarser warning signal."
+    )
+    st.markdown(f"**Baseline suspicious rate** (established on the held-out test set under normal conditions): **{BASELINE_SUSPICIOUS_RATE:.1%}**")
+
+    df_for_spike = load_holdout_test()
+    if df_for_spike is None:
+        df_for_spike = load_dataset()
+
+    window_size = st.slider("Simulated time-window size (number of transactions)", 50, 500, 200, key="spike_window_size")
+
+    c1, c2 = st.columns(2)
+    pull_normal_window = c1.button("Simulate a normal time window", use_container_width=True, key="spike_normal_btn")
+    pull_attack_window = c2.button("Simulate an attack wave", use_container_width=True, key="spike_attack_btn")
+
+    if pull_normal_window or pull_attack_window:
+        window = df_for_spike.sample(window_size, random_state=None).copy()
+        if pull_attack_window:
+            # Inject a burst of genuinely fraudulent transactions into the window --
+            # simulating a real coordinated attack wave landing in a short period,
+            # not just picking a noisier-than-usual random sample.
+            fraud_pool = df_for_spike[df_for_spike["is_fraud"] == 1]
+            n_inject = min(len(fraud_pool), max(10, window_size // 5))
+            injected = fraud_pool.sample(n_inject, random_state=None)
+            window = pd.concat([window, injected], ignore_index=True)
+            st.session_state["spike_label"] = f"Simulated attack wave ({n_inject} injected fraud cases added to a {window_size}-transaction window)"
+        else:
+            st.session_state["spike_label"] = f"Simulated normal window ({window_size} transactions, no injection)"
+
+        X_window = window[FEATURES]
+        rf_p = rf.predict_proba(X_window)[:, 1]
+        iso_raw = -iso.score_samples(X_window)
+        iso_p = np.clip((iso_raw - ISO_RAW_LOW) / (ISO_RAW_HIGH - ISO_RAW_LOW + 1e-9), 0, 1)
+        risk_scores_window = 0.7 * rf_p + 0.3 * iso_p
+        suspicious_mask = risk_scores_window >= (THRESHOLD - REVIEW_BAND)
+        observed_rate = float(suspicious_mask.mean())
+        n = len(window)
+
+        z = spike_z_score(observed_rate, BASELINE_SUSPICIOUS_RATE, n)
+        verdict = spike_verdict(z)
+
+        st.session_state["spike_result"] = {
+            "observed_rate": observed_rate, "n": n, "z": z, "verdict": verdict,
+        }
+
+    if "spike_result" in st.session_state:
+        sr = st.session_state["spike_result"]
+        st.markdown(f"#### {st.session_state['spike_label']}")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Observed suspicious rate", f"{sr['observed_rate']:.1%}",
+                   delta=f"{(sr['observed_rate'] - BASELINE_SUSPICIOUS_RATE) / BASELINE_SUSPICIOUS_RATE:+.0%} vs baseline")
+        c2.metric("Window size", sr["n"])
+        c3.metric("Z-score", f"{sr['z']:.2f}")
+
+        st.markdown(f"**Verdict:** {sr['verdict']}")
+
+        fig6 = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=sr["observed_rate"] * 100,
+            number={"suffix": "%"},
+            gauge={
+                "axis": {"range": [0, max(50, sr["observed_rate"] * 120)]},
+                "bar": {"color": "#e74c3c" if sr["z"] >= 3 else ("#f39c12" if sr["z"] >= 2 else "#27ae60")},
+                "threshold": {"line": {"color": "black", "width": 3}, "thickness": 0.8,
+                              "value": BASELINE_SUSPICIOUS_RATE * 100},
+            },
+            title={"text": "Suspicious rate (black line = baseline)"},
+        ))
+        fig6.update_layout(height=250, margin=dict(l=20, r=20, t=50, b=10))
+        st.plotly_chart(fig6, use_container_width=True)
+
+        if sr["z"] >= 2:
+            st.warning("A sustained elevated rate across multiple consecutive windows (not just one) would justify treating this as a genuine attack wave rather than a one-off noisy sample — a single window is a signal to keep watching, not to act on alone.")
+    else:
+        st.info("Click one of the buttons above to simulate a time window and check for a fraud spike.")

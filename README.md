@@ -264,6 +264,52 @@ This is the actual demo surface — a Streamlit app, not just a bare API:
 `POST /score` (FastAPI) and the dashboard both call the same underlying
 model — the dashboard is a UI layer on top of the same detector.
 
+## Runbook — what happens after a transaction gets flagged
+
+A model alone isn't a fraud system — it's decision support for a human
+process. This is deliberately not automated, since at this precision
+(54.5%) silent auto-action on every flag would create more operational
+noise than value.
+
+### 1. Triage (BLOCK / REVIEW cases land in the Review Queue)
+1. Open the **Review Queue Demo** tab, sorted by risk score — highest first.
+2. Read the **top SHAP reasons** for the flagged transaction — which
+   specific factors drove the score up?
+3. Check the **likely pattern hint** (UPI scam / SIM-swap / remote-access
+   / mule ring) — this points to what kind of investigation to do next.
+4. Optionally click **Generate AI explanation** for a plain-English
+   summary if the SHAP chart alone isn't enough context for whoever's
+   reviewing it.
+5. Cross-check: does `cross_merchant_velocity_1h` or
+   `distinct_merchants_24h` suggest this account/device/payee is active
+   elsewhere too — a single-merchant view alone would miss this.
+
+### 2. Decide (this happens in the real payment system, not this repo)
+- **REVIEW** → typically means step-up authentication (OTP/3-DS) rather
+  than an outright block — let a genuine customer clear a false alarm
+  in seconds.
+- **BLOCK** → hold the transaction, notify the customer, request manual
+  verification before releasing funds.
+- Avoid broad rules (e.g. blocking an entire merchant or region) on the
+  strength of one flagged transaction — narrow, reversible actions first.
+
+### 3. Confirm and feed back
+1. If a transaction is later confirmed as fraud (a customer dispute, a
+   bank chargeback, a merchant report) — log it in the **Report
+   Confirmed Fraud** tab.
+2. Repeated confirmed reports against the same merchant automatically
+   flag that merchant for enhanced monitoring.
+3. This confirmed-fraud data is exactly what would feed periodic model
+   retraining in a real deployment — it's the concrete answer to "where
+   do new labeled examples come from."
+
+### 4. Watch for drift
+- If the **Data Drift Monitor** tab flags a feature as shifted across
+  multiple recent batches (not just one noisy sample) — that's a signal
+  the model's training distribution no longer matches live traffic, and
+  a retrain (using the confirmed-fraud reports accumulated above) is
+  overdue, not optional.
+
 ## Known limitations (stated honestly, not hidden)
 
 - Trained on synthetic data. The fraud-pattern *shapes* are modeled on
