@@ -29,6 +29,101 @@ from app.fraud_reports import load_reports, add_report, merchant_risk_summary
 
 st.set_page_config(page_title="AI Risk Manager", page_icon="\U0001F6E1\ufe0f", layout="wide")
 
+# ------------------------------------------------------------ palette -----
+# "Control room, not carnival" -- color carries meaning only for the three
+# decision states; everything else stays neutral ink/paper/steel.
+INK = "#14181B"       # base background
+PAPER = "#F5F3EE"     # card/content background, primary text-on-dark
+STEEL = "#7C8B90"     # secondary text, neutral lines
+ALARM = "#C1442C"     # BLOCK / high risk
+ALARM_TINT = "#F2E0DB"
+CAUTION = "#B8862E"   # REVIEW / moderate risk
+CAUTION_TINT = "#F3E9D6"
+CLEAR = "#3E6350"     # ALLOW / low risk
+CLEAR_TINT = "#E8EDE7"
+STATUS_COLOR = {"BLOCK": ALARM, "REVIEW": CAUTION, "ALLOW": CLEAR}
+STATUS_TINT = {"BLOCK": ALARM_TINT, "REVIEW": CAUTION_TINT, "ALLOW": CLEAR_TINT}
+
+st.markdown(f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+[data-testid="stAppViewContainer"] * {{
+    font-family: 'Inter', sans-serif;
+}}
+[data-testid="stAppViewContainer"] h1,
+[data-testid="stAppViewContainer"] h2,
+[data-testid="stAppViewContainer"] h3,
+[data-testid="stAppViewContainer"] h4,
+[data-testid="stTabs"] button p {{
+    font-family: 'Space Grotesk', sans-serif !important;
+    letter-spacing: -0.01em;
+}}
+[data-testid="stAppViewContainer"] h1 {{ font-weight: 700 !important; }}
+[data-testid="stAppViewContainer"] h3,
+[data-testid="stAppViewContainer"] h4 {{ font-weight: 600 !important; }}
+/* status badges -- used via st.markdown wherever a decision is shown inline */
+.status-badge {{
+    display: inline-block;
+    padding: 0.2em 0.75em;
+    border-radius: 4px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 0.95em;
+}}
+[data-testid="stMetric"] {{
+    background-color: {PAPER}0d;
+    border: 1px solid {STEEL}33;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+}}
+/* nav bar (tabs) -- distinct band + accent underline instead of Streamlit's default blue */
+[data-testid="stTabs"] {{
+    border-bottom: 1px solid {STEEL}40;
+    margin-bottom: 1rem;
+}}
+[data-testid="stTabs"] [data-baseweb="tab-list"] {{
+    gap: 4px;
+}}
+[data-testid="stTabs"] button[aria-selected="true"] {{
+    border-bottom-color: {CAUTION} !important;
+}}
+[data-testid="stTabs"] button[aria-selected="true"] p {{
+    color: {CAUTION} !important;
+}}
+/* quieten Streamlit's default chrome */
+#MainMenu {{visibility: hidden;}}
+footer {{visibility: hidden;}}
+</style>
+""", unsafe_allow_html=True)
+
+# custom logo mark -- a hand-drawn shield + radar-pulse SVG in the app's own
+# accent color, replacing the raw OS emoji (which renders inconsistently
+# and looks generic rather than designed).
+# NOTE: built as ONE unbroken line with zero leading whitespace or blank
+# lines -- st.markdown's HTML-block detection can silently fall back to
+# rendering indented/blank-line-separated content as a literal code block
+# instead of raw HTML, which is exactly what happened with a prettier,
+# multi-line version of this same string.
+LOGO_SVG = (
+    '<svg width="42" height="42" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">'
+    f'<path d="M21 2.5 L37.5 8.5 V19.5 C37.5 29 30.5 36.5 21 39.5 C11.5 36.5 4.5 29 4.5 19.5 V8.5 Z" stroke="{CAUTION}" stroke-width="1.6" fill="{INK}"/>'
+    f'<circle cx="21" cy="19.5" r="7" stroke="{CAUTION}" stroke-width="1.2" fill="none" opacity="0.55"/>'
+    f'<circle cx="21" cy="19.5" r="3.2" fill="{CAUTION}"/>'
+    '</svg>'
+)
+HEADER_HTML = (
+    '<div style="display:flex; align-items:center; gap:0.85rem; margin-bottom:0.1rem;">'
+    + LOGO_SVG
+    + '<h1 style="margin:0; padding:0;">AI Risk Manager</h1>'
+    + '</div>'
+)
+st.markdown(HEADER_HTML, unsafe_allow_html=True)
+
+
+def status_badge(decision: str) -> str:
+    color = STATUS_COLOR.get(decision, STEEL)
+    return f'<span class="status-badge" style="background-color:{color}22; color:{color}; border:1px solid {color}55;">{decision}</span>'
+
 # ---------------------------------------------------------------- load ----
 @st.cache_resource
 def load_models():
@@ -165,7 +260,6 @@ def score_transaction(values: dict):
 
 
 # ------------------------------------------------------------------- UI ---
-st.title("\U0001F6E1\ufe0f AI Risk Manager")
 st.caption("Fraud-spike detector for Indian digital-payment fraud -- UPI scams, SIM-swap takeover, remote-access sessions, mule rings. Defense-only: scores and explains, never simulates or optimizes attacks.")
 
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
@@ -227,7 +321,7 @@ with tab1:
             sr = st.session_state["score_result"]
             vals, risk, decision, reasons, pattern = sr["vals"], sr["risk"], sr["decision"], sr["reasons"], sr["pattern"]
 
-            color = {"BLOCK": "#e74c3c", "REVIEW": "#f39c12", "ALLOW": "#27ae60"}[decision]
+            color = STATUS_COLOR[decision]
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
                 value=risk * 100,
@@ -236,9 +330,9 @@ with tab1:
                     "axis": {"range": [0, 100]},
                     "bar": {"color": color},
                     "steps": [
-                        {"range": [0, (THRESHOLD - REVIEW_BAND) * 100], "color": "#eafaf1"},
-                        {"range": [(THRESHOLD - REVIEW_BAND) * 100, THRESHOLD * 100], "color": "#fef5e7"},
-                        {"range": [THRESHOLD * 100, 100], "color": "#fdedec"},
+                        {"range": [0, (THRESHOLD - REVIEW_BAND) * 100], "color": CLEAR_TINT},
+                        {"range": [(THRESHOLD - REVIEW_BAND) * 100, THRESHOLD * 100], "color": CAUTION_TINT},
+                        {"range": [THRESHOLD * 100, 100], "color": ALARM_TINT},
                     ],
                     "threshold": {"line": {"color": "black", "width": 3}, "thickness": 0.8, "value": THRESHOLD * 100},
                 },
@@ -247,7 +341,7 @@ with tab1:
             fig.update_layout(height=280, margin=dict(l=20, r=20, t=50, b=10))
             st.plotly_chart(fig, use_container_width=True)
 
-            st.markdown(f"### Decision: <span style='color:{color}'>{decision}</span>", unsafe_allow_html=True)
+            st.markdown(f"### Decision &nbsp; {status_badge(decision)}", unsafe_allow_html=True)
             st.markdown(f"**Likely pattern:** {pattern}")
 
             st.markdown("#### Why this score -- top contributing factors")
@@ -256,7 +350,7 @@ with tab1:
             reason_df["direction"] = np.where(reason_df["impact"] > 0, "Pushes risk UP", "Pushes risk DOWN")
             fig2 = px.bar(
                 reason_df.sort_values("impact"), x="impact", y="label", color="direction",
-                color_discrete_map={"Pushes risk UP": "#e74c3c", "Pushes risk DOWN": "#27ae60"},
+                color_discrete_map={"Pushes risk UP": ALARM, "Pushes risk DOWN": CLEAR},
                 orientation="h", labels={"impact": "SHAP impact on risk score", "label": ""},
             )
             fig2.update_layout(height=280, margin=dict(l=10, r=10, t=10, b=10), showlegend=True)
@@ -359,7 +453,7 @@ with tab3:
     if "queue" in st.session_state:
         res_df = st.session_state["queue"]
         def highlight(row):
-            color = {"BLOCK": "background-color: #fdedec", "REVIEW": "background-color: #fef5e7", "ALLOW": "background-color: #eafaf1"}[row["decision"]]
+            color = f"background-color: {STATUS_TINT[row['decision']]}"
             return [color] * len(row)
         st.dataframe(res_df.style.apply(highlight, axis=1), use_container_width=True, height=500)
 
@@ -437,7 +531,7 @@ with tab4:
 
         fig4 = px.bar(
             report, x="psi", y="feature", orientation="h", color="psi",
-            color_continuous_scale=["#27ae60", "#f39c12", "#e74c3c"], range_color=[0, 0.5],
+            color_continuous_scale=[CLEAR, CAUTION, ALARM], range_color=[0, 0.5],
             labels={"psi": "PSI (higher = more drift)", "feature": ""},
         )
         fig4.add_vline(x=0.10, line_dash="dot", line_color="orange")
@@ -533,7 +627,7 @@ with tab5:
                 c3.metric("ALLOW", int((out_df["decision"] == "ALLOW").sum()))
 
                 def highlight_batch(row):
-                    color = {"BLOCK": "background-color: #fdedec", "REVIEW": "background-color: #fef5e7", "ALLOW": "background-color: #eafaf1"}[row["decision"]]
+                    color = f"background-color: {STATUS_TINT[row['decision']]}"
                     return [color] * len(row)
                 st.dataframe(out_df.style.apply(highlight_batch, axis=1), use_container_width=True, height=450)
 
@@ -602,9 +696,9 @@ with tab6:
                   delta_color="inverse")
 
         fig5 = go.Figure()
-        fig5.add_trace(go.Scatter(x=thresholds, y=costs, mode="lines", line=dict(color="#c0392b", width=2), name="Cost"))
-        fig5.add_vline(x=best_t, line_dash="dash", line_color="#2c3e50", annotation_text="your optimal")
-        fig5.add_vline(x=0.5, line_dash="dot", line_color="#7f8c8d", annotation_text="naive 0.5")
+        fig5.add_trace(go.Scatter(x=thresholds, y=costs, mode="lines", line=dict(color=ALARM, width=2), name="Cost"))
+        fig5.add_vline(x=best_t, line_dash="dash", line_color=INK, annotation_text="your optimal")
+        fig5.add_vline(x=0.5, line_dash="dot", line_color=STEEL, annotation_text="naive 0.5")
         fig5.update_layout(
             xaxis_title="Decision threshold", yaxis_title="Estimated cost (₹) on validation set",
             height=380, margin=dict(l=10, r=10, t=30, b=10),
@@ -754,7 +848,7 @@ with tab8:
             number={"suffix": "%"},
             gauge={
                 "axis": {"range": [0, max(50, sr["observed_rate"] * 120)]},
-                "bar": {"color": "#e74c3c" if sr["z"] >= 3 else ("#f39c12" if sr["z"] >= 2 else "#27ae60")},
+                "bar": {"color": ALARM if sr["z"] >= 3 else (CAUTION if sr["z"] >= 2 else CLEAR)},
                 "threshold": {"line": {"color": "black", "width": 3}, "thickness": 0.8,
                               "value": BASELINE_SUSPICIOUS_RATE * 100},
             },

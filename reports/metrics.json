@@ -50,6 +50,7 @@
       "recall": 1.0
     }
   },
+  "baseline_suspicious_rate": 0.1248,
   "validation_cost_curve": [
     {
       "threshold": 0.05,
