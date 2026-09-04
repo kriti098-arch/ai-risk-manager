@@ -452,10 +452,42 @@ with tab3:
 
     if "queue" in st.session_state:
         res_df = st.session_state["queue"]
-        def highlight(row):
-            color = f"background-color: {STATUS_TINT[row['decision']]}"
-            return [color] * len(row)
-        st.dataframe(res_df.style.apply(highlight, axis=1), use_container_width=True, height=500)
+
+        # Build a dark-compatible HTML table instead of st.dataframe which
+        # brings its own light theme that clashes with the dark background.
+        def row_color(decision):
+            return {"BLOCK": ALARM, "REVIEW": CAUTION, "ALLOW": CLEAR}.get(decision, STEEL)
+
+        rows_html = ""
+        for _, row in res_df.iterrows():
+            dc = row_color(row["decision"])
+            rows_html += (
+                f'<tr style="border-bottom:1px solid #ffffff15;">'
+                f'<td style="padding:6px 10px; color:{dc}; font-weight:600;">{row["decision"]}</td>'
+                f'<td style="padding:6px 10px;">₹{row["amount"]:,.0f}</td>'
+                f'<td style="padding:6px 10px;">{row["hour"]:02.0f}:00</td>'
+                f'<td style="padding:6px 10px; color:{dc};">{row["risk_score"]:.3f}</td>'
+                f'<td style="padding:6px 10px; font-size:0.85em; color:#aaa;">{row["likely_pattern"]}</td>'
+                f'<td style="padding:6px 10px; color:{"#e74c3c" if row["actually_fraud"]=="YES" else "#888"}; font-weight:{"600" if row["actually_fraud"]=="YES" else "400"};">{row["actually_fraud"]}</td>'
+                f'</tr>'
+            )
+
+        table_html = (
+            '<div style="overflow-x:auto; max-height:460px; overflow-y:auto; border:1px solid #ffffff15; border-radius:6px;">'
+            '<table style="width:100%; border-collapse:collapse; font-family:Inter,sans-serif; font-size:0.9em;">'
+            '<thead><tr style="background:#ffffff10; position:sticky; top:0;">'
+            '<th style="padding:8px 10px; text-align:left; color:#aaa; font-weight:600;">Decision</th>'
+            '<th style="padding:8px 10px; text-align:left; color:#aaa; font-weight:600;">Amount</th>'
+            '<th style="padding:8px 10px; text-align:left; color:#aaa; font-weight:600;">Hour</th>'
+            '<th style="padding:8px 10px; text-align:left; color:#aaa; font-weight:600;">Risk Score</th>'
+            '<th style="padding:8px 10px; text-align:left; color:#aaa; font-weight:600;">Likely Pattern</th>'
+            '<th style="padding:8px 10px; text-align:left; color:#aaa; font-weight:600;">Actually Fraud?</th>'
+            '</tr></thead>'
+            f'<tbody>{rows_html}</tbody>'
+            '</table></div>'
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
+        st.markdown("")
 
         n_flagged = (res_df["decision"] != "ALLOW").sum()
         n_caught = ((res_df["decision"] != "ALLOW") & (res_df["actually_fraud"] == "YES")).sum()
@@ -629,7 +661,17 @@ with tab5:
                 def highlight_batch(row):
                     color = f"background-color: {STATUS_TINT[row['decision']]}"
                     return [color] * len(row)
-                st.dataframe(out_df.style.apply(highlight_batch, axis=1), use_container_width=True, height=450)
+                # Use st.dataframe with use_container_width for the full
+                # batch table -- this one is fine as-is since it shows many
+                # columns the user will want to scroll/sort; the dark theme
+                # from config.toml applies here.
+                st.dataframe(
+                    out_df[["decision", "risk_score", "top_reason", "likely_pattern"] +
+                           [c for c in out_df.columns if c not in
+                            ["decision", "risk_score", "top_reason", "likely_pattern", "is_fraud", "fraud_pattern"]]]
+                    .style.apply(highlight_batch, axis=1),
+                    use_container_width=True, height=450
+                )
 
                 st.download_button(
                     "Download scored results as CSV",
@@ -763,11 +805,58 @@ with tab7:
     if reports_df.empty:
         st.info("No fraud reports logged yet — submit one above.")
     else:
-        st.dataframe(reports_df.sort_values("reported_at", ascending=False), use_container_width=True, height=250)
+        # HTML table for dark-theme compatibility
+        rpt_rows = ""
+        for _, row in reports_df.sort_values("reported_at", ascending=False).iterrows():
+            dc_color = {"BLOCK": ALARM, "REVIEW": CAUTION, "ALLOW": CLEAR}.get(str(row.get("decision_at_time", "")), STEEL)
+            rpt_rows += (
+                f'<tr style="border-bottom:1px solid #ffffff15;">'
+                f'<td style="padding:5px 8px; font-family:monospace; font-size:0.8em; color:#888;">{row["report_id"]}</td>'
+                f'<td style="padding:5px 8px; font-size:0.82em; color:#aaa;">{str(row["reported_at"])[:16]}</td>'
+                f'<td style="padding:5px 8px; font-weight:600;">{row["merchant_id"]}</td>'
+                f'<td style="padding:5px 8px;">₹{float(row["transaction_amount"]):,.0f}</td>'
+                f'<td style="padding:5px 8px; color:{dc_color}; font-weight:600;">{row.get("decision_at_time","—")}</td>'
+                f'<td style="padding:5px 8px; font-size:0.85em; color:#ccc;">{str(row["reason"])[:60]}{"…" if len(str(row["reason"]))>60 else ""}</td>'
+                f'</tr>'
+            )
+        st.markdown(
+            '<div style="overflow-x:auto; border:1px solid #ffffff15; border-radius:6px;">'
+            '<table style="width:100%; border-collapse:collapse; font-family:Inter,sans-serif; font-size:0.88em;">'
+            '<thead><tr style="background:#ffffff10;">'
+            '<th style="padding:7px 8px; text-align:left; color:#aaa;">ID</th>'
+            '<th style="padding:7px 8px; text-align:left; color:#aaa;">Reported at</th>'
+            '<th style="padding:7px 8px; text-align:left; color:#aaa;">Merchant</th>'
+            '<th style="padding:7px 8px; text-align:left; color:#aaa;">Amount</th>'
+            '<th style="padding:7px 8px; text-align:left; color:#aaa;">Decision at time</th>'
+            '<th style="padding:7px 8px; text-align:left; color:#aaa;">Reason</th>'
+            f'</tr></thead><tbody>{rpt_rows}</tbody></table></div>',
+            unsafe_allow_html=True
+        )
 
         st.markdown("#### Merchant risk summary")
         summary_df = merchant_risk_summary(reports_df)
-        st.dataframe(summary_df, use_container_width=True, height=200)
+        smry_rows = ""
+        for _, row in summary_df.iterrows():
+            flag_color = ALARM if "High risk" in str(row["flag"]) else CAUTION
+            smry_rows += (
+                f'<tr style="border-bottom:1px solid #ffffff15;">'
+                f'<td style="padding:6px 10px; font-weight:600;">{row["merchant_id"]}</td>'
+                f'<td style="padding:6px 10px;">{int(row["report_count"])}</td>'
+                f'<td style="padding:6px 10px;">₹{float(row["total_reported_amount"]):,.0f}</td>'
+                f'<td style="padding:6px 10px; color:{flag_color}; font-weight:600;">{row["flag"]}</td>'
+                f'</tr>'
+            )
+        st.markdown(
+            '<div style="overflow-x:auto; border:1px solid #ffffff15; border-radius:6px;">'
+            '<table style="width:100%; border-collapse:collapse; font-family:Inter,sans-serif; font-size:0.9em;">'
+            '<thead><tr style="background:#ffffff10;">'
+            '<th style="padding:7px 10px; text-align:left; color:#aaa;">Merchant</th>'
+            '<th style="padding:7px 10px; text-align:left; color:#aaa;">Reports</th>'
+            '<th style="padding:7px 10px; text-align:left; color:#aaa;">Total amount</th>'
+            '<th style="padding:7px 10px; text-align:left; color:#aaa;">Flag</th>'
+            f'</tr></thead><tbody>{smry_rows}</tbody></table></div>',
+            unsafe_allow_html=True
+        )
         st.caption("Merchants with 2+ confirmed reports are automatically flagged for enhanced monitoring — this is the concrete mechanism for \"tagging a merchant\" after fraud is discovered.")
 
     st.markdown("---")
