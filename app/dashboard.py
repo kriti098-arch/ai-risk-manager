@@ -47,7 +47,7 @@ STATUS_TINT = {"BLOCK": ALARM_TINT, "REVIEW": CAUTION_TINT, "ALLOW": CLEAR_TINT}
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-[data-testid="stAppViewContainer"] * {{
+[data-testid="stAppViewContainer"] *:not([data-testid="stIconMaterial"]){{
     font-family: 'Inter', sans-serif;
 }}
 [data-testid="stAppViewContainer"] h1,

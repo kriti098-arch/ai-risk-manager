@@ -1,0 +1,4 @@
+appeal_id,submitted_at,txn_id,merchant_id,transaction_amount,decision_at_time,risk_score_at_time,top_reasons_at_time,model_version,verification_method,verification_result,final_outcome,resolved_at,status
+AP-B8AF8568,2026-09-16T17:34:05,,5488,23.0,BLOCK,,[],rf-isoforest-v1.0,OTP re-verification with customer,Verification failed -- fraud confirmed,Correctly blocked -- fraud confirmed,2026-09-16T17:34:15,Resolved
+AP-00D87783,2026-09-16T17:40:53,,5488,23.0,BLOCK,,[],rf-isoforest-v1.0,OTP re-verification with customer,Pending,Pending,,Open
+AP-FB5819D1,2026-09-16T17:44:42,,xdzX,0.0,BLOCK,,[],rf-isoforest-v1.0,OTP re-verification with customer,Pending,Pending,,Open
