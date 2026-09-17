@@ -47,7 +47,7 @@ STATUS_TINT = {"BLOCK": ALARM_TINT, "REVIEW": CAUTION_TINT, "ALLOW": CLEAR_TINT}
 st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
-[data-testid="stAppViewContainer"] *:not([data-testid="stIconMaterial"]){{
+[data-testid="stAppViewContainer"] *:not([data-testid="stIconMaterial"]) {{
     font-family: 'Inter', sans-serif;
 }}
 [data-testid="stAppViewContainer"] h1,
@@ -659,8 +659,15 @@ with tab5:
                 c3.metric("ALLOW", int((out_df["decision"] == "ALLOW").sum()))
 
                 def highlight_batch(row):
-                    color = f"background-color: {STATUS_TINT[row['decision']]}"
-                    return [color] * len(row)
+                    # STATUS_TINT colors are light pastels meant for a light theme --
+                    # used opaque with no text color set, they paint the whole row
+                    # near-white while the dark-theme text stays light-colored too,
+                    # which is exactly the washed-out/invisible-text look. Use a
+                    # low-opacity overlay of the saturated STATUS_COLOR instead (same
+                    # pattern as the .status-badge CSS above) with an explicit light
+                    # text color, so it reads correctly against the dark background.
+                    style = f"background-color: {STATUS_COLOR[row['decision']]}22; color: {PAPER};"
+                    return [style] * len(row)
                 # Use st.dataframe with use_container_width for the full
                 # batch table -- this one is fine as-is since it shows many
                 # columns the user will want to scroll/sort; the dark theme
